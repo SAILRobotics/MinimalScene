@@ -5,7 +5,7 @@ using NetMQ.Sockets;
 public class HandTrackingSenderNetMQ : MonoBehaviour
 {
     [Header("NetMQ")]
-    [SerializeField] private int port = 5570;
+    [SerializeField] private int port = 6570;
     [SerializeField] private string bindHost = "*"; // "*" = all interfaces, "localhost" = local only
 
     [Header("Debug")]
