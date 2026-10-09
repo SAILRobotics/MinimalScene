@@ -27,6 +27,10 @@ public class TrackingDataVisualizer : MonoBehaviour
     private Dictionary<string, GameObject> _leftHandJoints;
     private Dictionary<string, GameObject> _rightHandJoints;
 
+    private static readonly int BaseColorID = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorID = Shader.PropertyToID("_Color");
+    private MaterialPropertyBlock _tintBlock;
+
 
     void Start()
     {
@@ -85,7 +89,39 @@ public class TrackingDataVisualizer : MonoBehaviour
         }
     }
 
-    public void UpdateMarkers(string json)  
+    /// <summary>
+    /// Tint one hand's joint markers ("Left" / "Right"), e.g. red while it is being
+    /// recorded. Pass null to restore the markers' own material colour.
+    /// </summary>
+    public void SetHandTint(string handedness, Color? tint)
+    {
+        var handJoints = handedness == "Left" ? _leftHandJoints
+                       : handedness == "Right" ? _rightHandJoints
+                       : null;
+        if (handJoints == null)
+            return;
+
+        _tintBlock ??= new MaterialPropertyBlock();
+        foreach (var marker in handJoints.Values)
+        {
+            foreach (var renderer in marker.GetComponentsInChildren<Renderer>(true))
+            {
+                if (tint.HasValue)
+                {
+                    renderer.GetPropertyBlock(_tintBlock);
+                    _tintBlock.SetColor(BaseColorID, tint.Value);
+                    _tintBlock.SetColor(ColorID, tint.Value);
+                    renderer.SetPropertyBlock(_tintBlock);
+                }
+                else
+                {
+                    renderer.SetPropertyBlock(null);
+                }
+            }
+        }
+    }
+
+    public void UpdateMarkers(string json)
     {   
         SerializableTrackingData trackingData = JsonConvert.DeserializeObject<SerializableTrackingData>(json);
     

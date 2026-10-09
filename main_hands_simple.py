@@ -13,16 +13,20 @@ Workflow
   3. To relock later: get within 1 m of marker 100 — the relock cube in Unity
      (Tool Id 100) turns orange — then click it. It flashes green on success.
      ENTER in the OpenCV window also relocks whenever the marker is visible.
+  4. Optional (--record-replay): pinch thumb + middle finger to record a hand and
+     press L / R to replay it in Unity — see hand_record_replay.py.
 
 Keys (OpenCV window must be focused)
 ------------------------------------
   ENTER = lock / relock
+  L / R = replay the newest left / right hand recording (--record-replay only)
   ESC   = quit
 
 Usage
 -----
   python main_hands_simple.py
   python main_hands_simple.py --quest-ip 192.168.50.201
+  python main_hands_simple.py --record-replay
 """
 
 import argparse
@@ -317,10 +321,19 @@ class HandDataReceiver:
         return _resolve("LeftHand"), _resolve("RightHand")
 
     def pinch_strength(self, key: str) -> "float | None":
+        block = self.hand_block(key)
+        return block.get("indexPinchStrength") if block else None
+
+    def hand_block(self, key: str) -> "dict | None":
+        """Raw JSON block for 'LeftHand' / 'RightHand' (None if not tracked)."""
         if self.data is None:
             return None
-        block = (self.data.get("hands") or {}).get(key)
-        return block.get("indexPinchStrength") if block else None
+        return (self.data.get("hands") or {}).get(key)
+
+    @property
+    def unity_timestamp(self) -> "float | None":
+        """Unity's Time.time when the current message was captured."""
+        return self.data.get("timestamp") if self.data else None
 
     def close(self):
         self._sub.close(0)
@@ -525,6 +538,13 @@ class SceneVis:
         self._set_hand(self._left, left)
         self._set_hand(self._right, right)
 
+    def set_hand_color(self, side: str, color) -> None:
+        pcd, lines = self._left if side == "left" else self._right
+        pcd.paint_uniform_color(color)
+        lines.paint_uniform_color(color)
+        self.vis.update_geometry(pcd)
+        self.vis.update_geometry(lines)
+
     def tick(self) -> bool:
         """Pump the window; returns False once the user closed it."""
         alive = self.vis.poll_events()
@@ -540,7 +560,7 @@ class SceneVis:
 # =============================================================================
 
 class MainScene:
-    def __init__(self, quest_ip: str):
+    def __init__(self, quest_ip: str, record_replay: bool = False):
         self.cam    = CamFeedReceiver(quest_ip, cfg.CAM_FEED_PORT, cfg.CAM_TOPIC)
         self.aruco  = ArUcoWorker(self.cam, AnchorDetector(cfg.ANCHOR_MARKER_ID,
                                                            cfg.ANCHOR_MARKER_SIZE,
@@ -550,7 +570,15 @@ class MainScene:
         self.relock = RelockButton(quest_ip, cfg.TOOL_CLICK_PORT, cfg.TOOL_COLOR_PORT,
                                    cfg.RELOCK_TOOL_ID)
         self.vis    = SceneVis(f"Hands Simple — world frame (marker #{cfg.ANCHOR_MARKER_ID})")
-        self._win   = (f"Quest Left Passthrough  [ENTER=lock/relock  ESC=quit]"
+
+        # Optional hand record / replay add-on (--record-replay).
+        self.record_replay = None
+        if record_replay:
+            from hand_record_replay import HandRecordReplay
+            self.record_replay = HandRecordReplay(quest_ip, self.vis)
+
+        extra_keys = self.record_replay.KEYS if self.record_replay else ""
+        self._win   = (f"Quest Left Passthrough  [ENTER=lock/relock{extra_keys}  ESC=quit]"
                        f"  anchor=#{cfg.ANCHOR_MARKER_ID}")
         cv.namedWindow(self._win, cv.WINDOW_NORMAL)
         cv.resizeWindow(self._win, *cfg.CV_WINDOW_SIZE)
@@ -632,6 +660,9 @@ class MainScene:
         else:
             lines.append((f"Head/hands: waiting for :{cfg.HAND_PORT}", red))
 
+        if self.record_replay:
+            lines.append(self.record_replay.status_line())
+
         for i, (text, color) in enumerate(lines):
             cv.putText(disp, text, (12, 34 + 32 * i), cv.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
         cv.imshow(self._win, disp)
@@ -651,6 +682,8 @@ class MainScene:
 
                 T_wt = self.anchor.T_world_tracking
                 left, right = self.hands.world_joints(T_wt)
+                if self.record_replay:
+                    self.record_replay.update(self.hands, left, right, T_wt)
 
                 self.vis.update_tracking(T_wt)
                 self.vis.update_head(self.anchor.world_T(center_T))
@@ -671,6 +704,8 @@ class MainScene:
                         print(f"[ENTER] Marker #{cfg.ANCHOR_MARKER_ID} not visible — cannot lock.")
                     else:
                         self._lock(frame, "ENTER")
+                elif self.record_replay:
+                    self.record_replay.handle_key(key)
         except KeyboardInterrupt:
             pass
         finally:
@@ -679,7 +714,10 @@ class MainScene:
     def close(self) -> None:
         self.aruco.stop()
         self.relock.set_color(cfg.RESET_COLOR)
-        for part in (self.cam, self.hands, self.anchor, self.relock):
+        parts = [self.cam, self.hands, self.anchor, self.relock]
+        if self.record_replay:
+            parts.append(self.record_replay)   # also saves any recording still in progress
+        for part in parts:
             try:
                 part.close()
             except Exception:
@@ -694,8 +732,11 @@ def main() -> None:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--quest-ip", default=cfg.UNITY_IP,
                         help=f"IP of the Quest running Unity (default {cfg.UNITY_IP})")
+    parser.add_argument("--record-replay", action="store_true",
+                        help="enable pinch-to-record hands and L/R replay in Unity "
+                             "(hand_record_replay.py)")
     args = parser.parse_args()
-    MainScene(args.quest_ip).run()
+    MainScene(args.quest_ip, record_replay=args.record_replay).run()
 
 
 if __name__ == "__main__":

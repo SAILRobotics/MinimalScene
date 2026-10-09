@@ -1475,6 +1475,7 @@ MonoBehaviour:
   trackingSpace: {fileID: 287432633}
   centerEyeAnchor: {fileID: 60090836}
   leftCamera: {fileID: 1390212603}
+  useOvrHeadPose: 1
   overrideRotation: 0
   overrideYOnly: 1
   smoothPosition: 0
@@ -1618,6 +1619,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1137762564}
   - component: {fileID: 1137762563}
+  - component: {fileID: 1137762565}
   m_Layer: 0
   m_Name: WorldRoot
   m_TagString: Untagged
@@ -1659,6 +1661,26 @@ Transform:
   - {fileID: 68571114}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1137762565
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1137762562}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 057726e5b7950244989f8b393ede1a7e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::HandReplayReceiver
+  replayRoot: {fileID: 0}
+  liveVisualizer: {fileID: 0}
+  jointPrefab: {fileID: 323056585713626324, guid: afe53fc5f5a6c3e45a102ce7ec73ccbe, type: 3}
+  leftColor: {r: 0.3, g: 0.6, b: 1, a: 1}
+  rightColor: {r: 1, g: 0.55, b: 0.1, a: 1}
+  boneWidth: 0.004
+  port: 6003
+  log: 1
 --- !u!1 &1390212602
 GameObject:
   m_ObjectHideFlags: 0
@@ -1747,6 +1769,7 @@ MonoBehaviour:
   jpegQuality: 60
   sendLeft: 1
   sendRight: 0
+  useOvrHeadPose: 1
   verboseLogs: 0
 --- !u!1 &1436965216
 GameObject:

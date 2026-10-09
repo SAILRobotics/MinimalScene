@@ -6,6 +6,8 @@
 # Socket convention (same as CoAssembly): Unity BINDS every socket, Python CONNECTS
 # to UNITY_IP. Ports must match the Unity components listed next to each one.
 
+from pathlib import Path
+
 # ── Machine IPs ───────────────────────────────────────────────────────────────
 UNITY_IP = "192.168.50.167"   # Quest running the Unity app (override with --quest-ip)
 
@@ -17,6 +19,7 @@ TOOL_CLICK_PORT = 6001   # select / hover events (ToolClickPublisher)
 # ── Ports (Python → Unity) ────────────────────────────────────────────────────
 WORLD_ROOT_PORT = 6000   # world root transform (WorldRootPoseReceiverNetMQ)
 TOOL_COLOR_PORT = 6002   # per-tool highlight colour (ToolColorReceiver)
+REPLAY_PORT     = 6003   # hand replays + recording state (HandReplayReceiver)
 
 # ── ArUco ─────────────────────────────────────────────────────────────────────
 ARUCO_DICT         = "DICT_6X6_1000"   # name of a cv2.aruco predefined dictionary
@@ -42,6 +45,16 @@ COLOR_REFRESH_S = 1.0                       # republish current colour so late s
 
 # ── Hand filtering ────────────────────────────────────────────────────────────
 MAX_HAND_HEAD_DIST = 2.0   # metres — drop a hand whose palm is farther than this from the head
+
+# ── Hand recording / replay ───────────────────────────────────────────────────
+# Pinch thumb tip + middle tip on a hand to start recording it; pinch again to stop
+# and save. Each hand is independent. L / R in the OpenCV window replays the newest
+# saved recording of that hand in Unity.
+RECORDINGS_DIR      = Path(__file__).resolve().parent / "recordings"
+PINCH_ON_DIST       = 0.020   # metres — thumb-middle tip distance that counts as a pinch
+PINCH_OFF_DIST      = 0.040   # metres — must open past this before the next pinch counts
+RECORDING_COLOR     = [1.0, 0.0, 0.0]   # live hand colour while recording (Open3D + Unity)
+RECORD_STATE_REFRESH_S = 1.0  # republish recording state so a late Unity subscriber catches up
 
 # ── Visualisation ─────────────────────────────────────────────────────────────
 WORLD_FRAME_SIZE  = 0.30            # Open3D world axes length (m)
