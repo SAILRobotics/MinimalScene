@@ -23,8 +23,20 @@ public class PassthroughCameraPublisher : MonoBehaviour
     public bool sendLeft = true;
     public bool sendRight = false;
 
+    [Header("Camera pose source")]
+    [Tooltip("If true (default), the published camera pose is OVR's Head node at the frame's " +
+             "capture time composed with the camera's LensOffset — what GetCameraPose() returned " +
+             "in Meta XR SDK v85. From v207 on, GetCameraPose() uses MRUK's native headset pose, " +
+             "which is not in the same frame as CenterEyeAnchor / the hand joints sent to Python.")]
+    public bool useOvrHeadPose = true;
+
     [Header("Debug")]
     public bool verboseLogs = true;
+
+    // PassthroughCameraAccess keeps the frame's capture time (XrTime, ns) private.
+    private static readonly System.Reflection.FieldInfo TimestampField = typeof(PassthroughCameraAccess)
+        .GetField("_timestampNsMonotonic",
+                  System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
 
     private PublisherSocket pub;
     private Thread sendThread;
@@ -133,8 +145,8 @@ public class PassthroughCameraPublisher : MonoBehaviour
         PassthroughCameraAccess.CameraIntrinsics intr;
         try
         {
-            camPose = cam.GetCameraPose();
             intr = cam.Intrinsics;
+            camPose = useOvrHeadPose ? OvrCameraPose(cam, intr.LensOffset) : cam.GetCameraPose();
         }
         catch (Exception e)
         {
@@ -214,6 +226,21 @@ public class PassthroughCameraPublisher : MonoBehaviour
                 Debug.LogError($"[PUB] {topic}: exception during readback/encode: {e}");
             }
         });
+    }
+
+    /// <summary>
+    /// Camera pose = OVR Head node at the frame's capture time ∘ LensOffset (v85 GetCameraPose).
+    /// Falls back to the SDK's GetCameraPose() if the timestamp field is unavailable.
+    /// </summary>
+    private static Pose OvrCameraPose(PassthroughCameraAccess cam, Pose lensOffset)
+    {
+        long ns = TimestampField != null ? (long)TimestampField.GetValue(cam) : 0;
+        if (ns <= 0)
+            return cam.GetCameraPose();
+
+        OVRPose head = OVRPlugin.GetNodePoseStateAtTime(ns * 1e-9, OVRPlugin.Node.Head).Pose.ToOVRPose();
+        return new Pose(head.position + head.orientation * lensOffset.position,
+                        head.orientation * lensOffset.rotation);
     }
 
     private void SendLoop()
