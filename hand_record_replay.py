@@ -4,6 +4,7 @@ hand_record_replay.py — Record hand joint data with a pinch and replay it in U
 Optional add-on for main_hands_simple.py, enabled with:
 
     python main_hands_simple.py --record-replay
+    python main_hands_simple.py --record-replay --replay-skeleton   # also draw joints + bones
 
 Workflow
 --------
@@ -12,7 +13,8 @@ Workflow
      recording is saved as a new JSON file in recordings/. Each hand records
      independently, so both can record at once. Requires the world to be locked.
   2. Replay: press L or R in the OpenCV window to play the newest saved recording
-     of that hand once in Unity as a ghost skeleton, anchored to marker 100.
+     of that hand once in Unity, anchored to marker 100. The hand mesh is always
+     shown; --replay-skeleton adds the joint/bone skeleton on top.
 
 Unity side: HandReplayReceiver on WorldRoot (REPLAY_PORT). Settings live in
 main_settings.py under "Hand recording / replay".
@@ -57,6 +59,31 @@ def extract_joint_poses(hand_block):
     if len(pos) != _N_JOINTS:
         return None
     return np.array(pos, dtype=np.float64), np.array(rot, dtype=np.float64)
+
+
+def extract_mesh_pose(hand_block):
+    """What Unity's HandVisual needs to pose the hand mesh, from the optional
+    rootPose / scale / localJoints fields of a hand block:
+    (root position (3,), root rotation xyzw (4,), scale, local joints (N, 7)), or None.
+    Local joint poses are relative to their parent bone, so they need no conversion."""
+    if not hand_block:
+        return None
+    root = hand_block.get("rootPose")
+    local = hand_block.get("localJoints")
+    if not root or not local:
+        return None
+    p, r = root.get("position") or {}, root.get("rotation") or {}
+    joints = []
+    for pose in local:
+        jp = (pose or {}).get("position") or {}
+        jr = (pose or {}).get("rotation") or {}
+        joints.append([jp.get("x", 0.0), jp.get("y", 0.0), jp.get("z", 0.0),
+                       jr.get("x", 0.0), jr.get("y", 0.0), jr.get("z", 0.0), jr.get("w", 1.0)])
+    return (np.array([p.get("x", 0.0), p.get("y", 0.0), p.get("z", 0.0)], dtype=np.float64),
+            np.array([r.get("x", 0.0), r.get("y", 0.0), r.get("z", 0.0), r.get("w", 1.0)],
+                     dtype=np.float64),
+            float(hand_block.get("scale", 1.0)),
+            np.array(joints, dtype=np.float64))
 
 
 def tracking_to_root_local(pos_unity: np.ndarray, rot_unity: np.ndarray,
@@ -116,11 +143,21 @@ class HandRecorder:
             if self._t0 is None:
                 self._t0 = ts
             local_pos, local_rot = tracking_to_root_local(pos, rot, T_world_tracking)
-            self._frames.append({
+            frame = {
                 "t": round(float(ts - self._t0), 4),
                 "positions": np.round(local_pos, 5).tolist(),
                 "rotations": np.round(local_rot, 5).tolist(),
-            })
+            }
+            mesh = extract_mesh_pose(hand_block)
+            if mesh is not None:
+                root_pos, root_rot, scale, local_joints = mesh
+                rp, rr = tracking_to_root_local(root_pos[None], root_rot[None], T_world_tracking)
+                frame["mesh"] = {
+                    "root": np.round(np.concatenate([rp[0], rr[0]]), 5).tolist(),
+                    "scale": round(scale, 5),
+                    "joints_local": np.round(local_joints, 5).tolist(),
+                }
+            self._frames.append(frame)
             self._last_ts = ts
 
     def _start(self, T_world_tracking) -> None:
@@ -152,6 +189,10 @@ class HandRecorder:
                       "Unity axes (x right, y up, z forward), metres; rotations xyzw"),
             "joint_names": _JOINT_NAMES,
             "bones": _HAND_BONES.tolist(),
+            "mesh_format": ("frames[].mesh (when present): root = hand root pose local to "
+                            "WorldRoot [x, y, z, qx, qy, qz, qw]; scale = hand scale; "
+                            "joints_local = per-joint pose relative to its parent bone in "
+                            "Interaction SDK HandJointId order, [x, y, z, qx, qy, qz, qw] each"),
             "frame_count": len(self._frames),
             "duration_s": self._frames[-1]["t"],
             "frames": self._frames,
@@ -199,14 +240,25 @@ class ReplayLink:
                                           "color": cfg.RECORDING_COLOR}))
         self._last_state_send = time.monotonic()
 
-    def replay(self, path: Path) -> None:
+    def replay(self, path: Path, skeleton: bool) -> None:
+        """Send a recording to Unity. The mesh always plays; `skeleton` adds joints + bones."""
         data = json.loads(path.read_text())
-        frames = [{"t": f["t"], "p": [c for p in f["positions"] for c in p]}
-                  for f in data["frames"]]
+        frames = []
+        for f in data["frames"]:
+            out = {"t": f["t"], "p": [c for p in f["positions"] for c in p]}
+            mesh = f.get("mesh")
+            if mesh:
+                out["r"] = mesh["root"]
+                out["s"] = mesh["scale"]
+                out["j"] = [c for joint in mesh["joints_local"] for c in joint]
+            frames.append(out)
         self._pub.send_string(json.dumps({"type": "replay", "hand": data["hand"],
-                                          "frames": frames}))
+                                          "skeleton": bool(skeleton), "frames": frames}))
+        has_mesh = bool(frames) and "j" in frames[0]
         print(f"[Replay] {data['hand']} hand: {path.name} "
-              f"({len(frames)} frames, {data.get('duration_s', 0):.1f} s)")
+              f"({len(frames)} frames, {data.get('duration_s', 0):.1f} s, "
+              f"{'mesh' if has_mesh else 'no mesh data — skeleton only'}"
+              f"{' + skeleton' if skeleton and has_mesh else ''})")
 
     def close(self):
         for side in self._recording:
@@ -224,8 +276,9 @@ class HandRecordReplay:
 
     KEYS = "  L/R=replay"
 
-    def __init__(self, quest_ip: str, vis):
+    def __init__(self, quest_ip: str, vis, show_skeleton: bool = False):
         self._vis = vis
+        self.show_skeleton = show_skeleton   # replay joints + bones on top of the mesh
         self.link = ReplayLink(quest_ip, cfg.REPLAY_PORT)
         self.recorders = {"left": HandRecorder("left"), "right": HandRecorder("right")}
 
@@ -264,7 +317,7 @@ class HandRecordReplay:
         if path is None:
             print(f"[Replay] No {side} hand recording in {cfg.RECORDINGS_DIR}")
         else:
-            self.link.replay(path)
+            self.link.replay(path, self.show_skeleton)
         return True
 
     def close(self) -> None:

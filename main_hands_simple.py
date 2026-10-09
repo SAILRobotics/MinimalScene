@@ -27,6 +27,7 @@ Usage
   python main_hands_simple.py
   python main_hands_simple.py --quest-ip 192.168.50.201
   python main_hands_simple.py --record-replay
+  python main_hands_simple.py --record-replay --replay-skeleton
 """
 
 import argparse
@@ -560,7 +561,7 @@ class SceneVis:
 # =============================================================================
 
 class MainScene:
-    def __init__(self, quest_ip: str, record_replay: bool = False):
+    def __init__(self, quest_ip: str, record_replay: bool = False, replay_skeleton: bool = False):
         self.cam    = CamFeedReceiver(quest_ip, cfg.CAM_FEED_PORT, cfg.CAM_TOPIC)
         self.aruco  = ArUcoWorker(self.cam, AnchorDetector(cfg.ANCHOR_MARKER_ID,
                                                            cfg.ANCHOR_MARKER_SIZE,
@@ -575,7 +576,7 @@ class MainScene:
         self.record_replay = None
         if record_replay:
             from hand_record_replay import HandRecordReplay
-            self.record_replay = HandRecordReplay(quest_ip, self.vis)
+            self.record_replay = HandRecordReplay(quest_ip, self.vis, show_skeleton=replay_skeleton)
 
         extra_keys = self.record_replay.KEYS if self.record_replay else ""
         self._win   = (f"Quest Left Passthrough  [ENTER=lock/relock{extra_keys}  ESC=quit]"
@@ -735,8 +736,14 @@ def main() -> None:
     parser.add_argument("--record-replay", action="store_true",
                         help="enable pinch-to-record hands and L/R replay in Unity "
                              "(hand_record_replay.py)")
+    parser.add_argument("--replay-skeleton", action="store_true",
+                        help="with --record-replay: draw the joint/bone skeleton on top of "
+                             "the replayed hand mesh (the mesh is always shown)")
     args = parser.parse_args()
-    MainScene(args.quest_ip, record_replay=args.record_replay).run()
+    if args.replay_skeleton and not args.record_replay:
+        parser.error("--replay-skeleton requires --record-replay")
+    MainScene(args.quest_ip, record_replay=args.record_replay,
+              replay_skeleton=args.replay_skeleton).run()
 
 
 if __name__ == "__main__":

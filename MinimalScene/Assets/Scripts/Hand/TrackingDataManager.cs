@@ -141,6 +141,22 @@ public class TrackingDataManager : MonoBehaviour
         }
         handData.indexPinchStrength = hand.GetFingerPinchStrength(HandFinger.Index);
 
+        // Mesh pose, mirroring HandVisual.UpdateSkeleton(), so a recording can be
+        // replayed on the real hand mesh.
+        if (hand.GetRootPose(out Pose rootPose))
+        {
+            handData.rootPose = new SerializablePose(rootPose);
+        }
+        handData.scale = hand.Scale;
+        if (hand.GetJointPosesLocal(out ReadOnlyHandJointPoses localJoints))
+        {
+            handData.localJoints = new List<SerializablePose>(Constants.NUM_HAND_JOINTS);
+            for (int i = 0; i < Constants.NUM_HAND_JOINTS; i++)
+            {
+                handData.localJoints.Add(new SerializablePose(localJoints[i]));
+            }
+        }
+
         return handData;
     }
 }
